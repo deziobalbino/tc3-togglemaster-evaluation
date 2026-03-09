@@ -1,0 +1,16 @@
+/auth-service
+/evaluation-service
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+.env
+.env.*
+*.pem
+*.key
+.idea/
+.vscode/
+*.swp
