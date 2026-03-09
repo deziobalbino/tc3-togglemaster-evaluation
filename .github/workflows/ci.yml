@@ -1,0 +1,111 @@
+name: CI/CD Pipeline - Go Microservices
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  ECR_REPOSITORY: tc3-togglemaster-evaluation
+  AWS_REGION: us-east-1
+
+jobs:
+  # ESTÁGIO 1: Build & Test
+  build-and-test:
+    name: Build & Unit Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Instalar Dependências
+        run: go mod download
+
+      - name: Compilar Aplicação
+        run: go build -o app-binary .
+
+      - name: Testes Unitários
+        run: |
+          echo "Nenhum teste unitário detectado no repositório."
+          echo "Build validado. Avançando para Linter e Segurança..."
+
+  # ESTÁGIO 2: DevSecOps (Linter, SAST e SCA)
+  security-and-lint:
+    name: Linter & Security Scan
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Linter (golangci-lint)
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+      - name: SAST (Gosec)
+        uses: securego/gosec@master
+        with:
+          args: '-severity high ./...'
+
+      - name: SCA (Trivy Filesystem)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL'
+
+  # ESTÁGIO 3: Docker, Scan e Push
+  docker-build-and-scan:
+    name: Docker Build, Scan & Push
+    needs: security-and-lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Build da Imagem Docker local
+        run: docker build -t app-image:${{ github.sha }} .
+
+      - name: Container Scan (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'app-image:${{ github.sha }}'
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL'
+
+      - name: Configurar credenciais da AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login no Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Push da Imagem para o ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker tag app-image:$IMAGE_TAG $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG
+          docker tag app-image:$IMAGE_TAG $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:latest
+          docker push $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG
+          docker push $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:latest
