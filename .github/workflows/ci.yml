@@ -109,3 +109,44 @@ jobs:
           docker tag app-image:$IMAGE_TAG $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:latest
           docker push $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG
           docker push $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:latest
+
+  # ESTÁGIO 4: GitOps (Update Manifests)
+  update-gitops:
+    name: Update GitOps Repository
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: docker-build-and-scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do Repositório GitOps
+        uses: actions/checkout@v4
+        with:
+          repository: Pereira277/tc3-togglemaster
+          token: ${{ secrets.GITOPS_PAT }}
+          ref: main
+
+      - name: Atualizar a tag da imagem no evaluation-deployment.yaml
+        env:
+          AWS_ACCOUNT_ID: "518900743906"
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          NEW_IMAGE="${AWS_ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}"
+          MANIFEST_PATH="gitops/evaluation/evaluation-deployment.yaml"
+
+          echo "Atualizando imagem para: $NEW_IMAGE no arquivo $MANIFEST_PATH"
+
+          sed -i "s|image: ${AWS_ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:.*|image: ${NEW_IMAGE}|g" $MANIFEST_PATH
+
+      - name: Commit e Push das alterações
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+
+          git add gitops/evaluation/evaluation-deployment.yaml
+
+          if git diff --cached --quiet; then
+            echo "Nenhuma alteração para commit."
+            exit 0
+          fi
+
+          git commit -m "GitOps: Atualizando evaluation-service para a tag ${{ github.sha }}"
+          git push origin main
