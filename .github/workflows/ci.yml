@@ -120,7 +120,7 @@ jobs:
       - name: Checkout do Repositório GitOps
         uses: actions/checkout@v4
         with:
-          repository: Pereira277/tc3-togglemaster
+          repository: deziobalbino/tc3-togglemaster
           token: ${{ secrets.GITOPS_PAT }}
           ref: main
 
